@@ -1,6 +1,7 @@
 # Data
 #/data/
-
+!data/processed/    ← allow processed
+data/raw/crisis_raw.csv
 # Mac OS-specific storage files
 .DS_Store
 
