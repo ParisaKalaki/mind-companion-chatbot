@@ -22,12 +22,6 @@ FIGURES    = Path('reports/figures')
 MAX_LENGTH = 128
 BATCH_SIZE = 32
 
-CRISIS_KEYWORDS = [
-    'ending it all', 'end it all', 'no reason to live',
-    'want to die', 'better off dead', 'can\'t go on',
-    'no point anymore', 'goodbye forever', 'final goodbye',
-    'don\'t want to be here', 'disappear forever'
-]
 
 # ── Dataset class ──────────────────────────────────────────────────────
 class CrisisDataset(Dataset):
@@ -51,10 +45,6 @@ class CrisisDataset(Dataset):
             'label':          self.labels[idx]
         }
 
-# ── Keyword check ──────────────────────────────────────────────────────
-def keyword_check(text):
-    text_lower = text.lower()
-    return any(kw in text_lower for kw in CRISIS_KEYWORDS)
 
 # ── Evaluate ───────────────────────────────────────────────────────────
 def evaluate():
@@ -97,11 +87,7 @@ def evaluate():
             if i % 10 == 0:
                 print(f'  Batch {i}/{len(loader)}...')
 
-    # Apply keyword override
-    print('Applying keyword override...')
-    for i, text in enumerate(df['text'].tolist()):
-        if keyword_check(text):
-            all_preds[i] = 1
+
 
     # ── Metrics ────────────────────────────────────────────────────────
     acc  = accuracy_score(all_labels, all_preds)
