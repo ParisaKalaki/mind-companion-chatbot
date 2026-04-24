@@ -191,3 +191,4 @@ cython_debug/
 .pypircdata/processed/crisis_train.csv
 data/processed/crisis_val.csv
 data/processed/crisis_test.csv
+models/
