@@ -19,24 +19,37 @@ def load_model():
     return tokenizer, model
 
 # ── Predict single message ─────────────────────────────────────────────
+CRISIS_KEYWORDS = [
+    'ending it all', 'end it all', 'no reason to live',
+    'want to die', 'better off dead', 'can\'t go on',
+    'no point anymore', 'goodbye forever', 'final goodbye',
+    'don\'t want to be here', 'disappear forever'
+]
+
 def is_crisis(text, tokenizer, model, threshold=0.7):
-    inputs = tokenizer(
-        text,
-        return_tensors='pt',
-        truncation=True,
-        padding='max_length',
-        max_length=MAX_LENGTH
-    )
+    # Rule-based check first
+    # text_lower = text.lower()
+    # if any(kw in text_lower for kw in CRISIS_KEYWORDS):
+    #     return {
+    #         'is_crisis':  True,
+    #         'confidence': 1.0,
+    #         'label':      'crisis',
+    #         'method':     'keyword'
+    #     }
+    
+    # ML model check
+    inputs = tokenizer(text, return_tensors='pt', truncation=True,
+                       padding='max_length', max_length=MAX_LENGTH)
     with torch.no_grad():
         logits = model(**inputs).logits
-    
-    probs      = torch.softmax(logits, dim=1)
-    crisis_prob = probs[0][1].item()  # probability of class 1 (crisis)
-    
+    probs = torch.softmax(logits, dim=1)
+    crisis_prob = probs[0][1].item()
+
     return {
-        'is_crisis':   crisis_prob >= threshold,
-        'confidence':  round(crisis_prob, 4),
-        'label':       'crisis' if crisis_prob >= threshold else 'non-crisis'
+        'is_crisis':  crisis_prob >= threshold,
+        'confidence': round(crisis_prob, 4),
+        'label':      'crisis' if crisis_prob >= threshold else 'non-crisis',
+        'method':     'model'
     }
 
 # ── Test it ────────────────────────────────────────────────────────────
