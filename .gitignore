@@ -192,3 +192,4 @@ cython_debug/
 data/processed/crisis_val.csv
 data/processed/crisis_test.csv
 models/
+.vscode/
