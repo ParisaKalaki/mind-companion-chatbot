@@ -190,3 +190,54 @@ assignment3/
 Key column: `document` (Question + Answer combined)
 
 Message Parisa if you get stuck.
+
+## What's left (in order)
+
+### Step 1 — RAG Pipeline (`feature/rag-pipeline`)
+
+- `build_index.py` → Index `counsel_chat_clean.csv` into ChromaDB
+- `embedder.py` → Convert user message into a vector
+- `retriever.py` → Search ChromaDB and return top 3 relevant chunks
+
+---
+
+### Step 2 — LLM Integration (`feature/llm-integration`)
+
+- `generator.py` → Send user message + RAG chunks to Groq API
+  - Returns an empathetic response
+
+---
+
+### Step 3 — Connect Everything (`pipeline.py`)
+
+User message
+↓
+Crisis classifier → if crisis → return Lifeline number
+↓ (if not crisis)
+RAG retriever → get relevant chunks
+↓
+LLM generator → generate response using chunks
+↓
+Return response to user
+
+---
+
+### Step 4 — App / Demo UI (`feature/app-and-demo`)
+
+- `app.py` → Simple Gradio chat interface for the demo
+
+---
+
+### Step 5 — Evaluation (`feature/evaluation`)
+
+- Evaluate RAG quality → Are retrieved chunks relevant?
+- Evaluate full pipeline → End-to-end response quality
+- Generate all figures → For the report
+
+---
+
+### Step 6 — Report + Slides
+
+- Write report sections
+- Build PowerPoint slides
+- Record demo video
