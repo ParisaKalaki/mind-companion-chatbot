@@ -32,17 +32,33 @@ def load_counsel_chat():
     return df
 
 def load_crisis_data():
-    df = load_dataset('ShreyaR/suicidewatch', split='train').to_pandas()
-    df.to_csv('data/raw/crisis_raw.csv', index=False)
+    local_path = Path('data/raw/crisis_raw.csv')
+    
+    if not local_path.exists():
+        raise FileNotFoundError(
+            'crisis_raw.csv not found. Download it from Kaggle:\n'
+            'https://www.kaggle.com/datasets/nikhileswarkomati/suicide-watch\n'
+            'and place it in data/raw/crisis_raw.csv'
+        )
+    
+    print('Loading crisis data from data/raw/crisis_raw.csv...')
+    df = pd.read_csv(local_path)
+
+    # Drop unnamed index column if present (Kaggle CSV artifact)
+    if 'Unnamed: 0' in df.columns:
+        df = df.drop(columns=['Unnamed: 0'])
+
     df = df[['text', 'class']].copy()
     df.columns = ['text', 'label']
     df['text'] = df['text'].apply(clean_text)
     df = df[df['text'].str.len() >= 20].dropna()
     df['label_binary'] = df['label'].map({'suicide': 1, 'non-suicide': 0})
+
     train, temp = train_test_split(df, test_size=0.30, random_state=42,
                                     stratify=df['label_binary'])
     val, test   = train_test_split(temp, test_size=0.50, random_state=42,
                                     stratify=temp['label_binary'])
+
     train.to_csv('data/processed/crisis_train.csv', index=False)
     val.to_csv(  'data/processed/crisis_val.csv',   index=False)
     test.to_csv( 'data/processed/crisis_test.csv',  index=False)
