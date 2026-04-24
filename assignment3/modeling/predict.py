@@ -59,8 +59,8 @@ if __name__ == '__main__':
     print('✅ Model loaded\n')
 
     test_messages = [
-        "I have been feeling really anxious lately and don't know what to do",
-        "I want to kill myself, I can't take this anymore",
+        "I have been feeling really anxious lately and don't know what to do 😃 ",
+        "I want to kill myself, I can't take this anymore 😃",
         "Can you help me with some breathing exercises?",
         "I've been having dark thoughts and feel like ending it all",
         "I'm struggling with my relationship and feeling lost",
