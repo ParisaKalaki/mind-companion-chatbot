@@ -217,7 +217,7 @@ Crisis classifier → if crisis → return Lifeline number
 RAG retriever → get relevant chunks
 ↓
 LLM generator → generate response using chunks
-↓
+↓ 
 Return response to user
 
 ---
