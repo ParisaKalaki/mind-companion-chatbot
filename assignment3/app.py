@@ -363,11 +363,54 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # ===========================================================================
+# Bootstrap — download large artifacts on first Streamlit Cloud boot
+# ===========================================================================
+def _bootstrap_artifacts() -> None:
+    """
+    Download the crisis classifier (~265 MB) on first Streamlit Cloud boot.
+    Streamlit Cloud gives a fresh container per deploy, and the classifier
+    weights are too big to commit to GitHub.
+
+    No-op if all classifier files are already on disk (local dev).
+    """
+    from config import MODELS_DIR
+
+    classifier_dir = MODELS_DIR / "crisis_classifier"
+    needed_files = [
+        "config.json",
+        "model.safetensors",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ]
+    all_present = (
+        classifier_dir.exists()
+        and all((classifier_dir / f).exists() for f in needed_files)
+    )
+    if all_present:
+        return
+
+    st.info(
+        "📥 First-time setup: downloading the crisis classifier (~265 MB). "
+        "This happens once per deployment and takes about 30 seconds."
+    )
+    try:
+        from download_model import download_crisis_classifier
+        download_crisis_classifier()
+    except Exception as e:
+        st.error(
+            f"Could not download the crisis classifier: {e}\n\n"
+            "Check that the Drive files are still set to 'Anyone with the link'."
+        )
+        st.stop()
+
+
+# ===========================================================================
 # Component caching
 # ===========================================================================
 @st.cache_resource(show_spinner=False)
 def _load_components():
-    """Trigger lazy load of rag.py components and cache for the session."""
+    """Bootstrap missing artifacts, then trigger lazy load of rag.py components."""
+    _bootstrap_artifacts()
     return rag.get_components()
 
 
@@ -601,7 +644,22 @@ def main() -> None:
 
     settings = render_sidebar()
 
-    # --- Resolve API key ----------------------------------------------------
+    # --- Heavy components FIRST (cached) -----------------------------------
+    # MUST run before set_gemini_client, because that function indirectly
+    # triggers get_components() — which fails if the classifier isn't on
+    # disk yet. _load_components() handles bootstrap before that happens.
+    try:
+        with st.spinner("⚡ Warming up models ..."):
+            _load_components()
+    except FileNotFoundError as e:
+        st.error(
+            f"Required artifacts missing: {e}\n\n"
+            "Run dataset.py, clean.py, download_model.py, and the indexing "
+            "notebook cells before launching the app."
+        )
+        st.stop()
+
+    # --- Resolve API key (after components are ready) ----------------------
     api_key, key_source = _resolve_api_key(settings["user_key"])
     if api_key is None:
         st.error(
@@ -617,18 +675,6 @@ def main() -> None:
         except Exception as e:
             st.error(f"Failed to initialize Gemini client: {e}")
             st.stop()
-
-    # --- Heavy components (cached) ------------------------------------------
-    try:
-        with st.spinner("⚡ Warming up models ..."):
-            _load_components()
-    except FileNotFoundError as e:
-        st.error(
-            f"Required artifacts missing: {e}\n\n"
-            "Run dataset.py, clean.py, download_model.py, and the indexing "
-            "notebook cells before launching the app."
-        )
-        st.stop()
 
     # --- Empty state --------------------------------------------------------
     if not st.session_state.messages:
