@@ -39,11 +39,22 @@ import rag  # noqa: E402
 # ===========================================================================
 # Page config
 # ===========================================================================
+# Dynamic sidebar state: if we previously hit a quota error, force the sidebar
+# open on this rerun so the user can see the API key field. set_page_config
+# only honors initial_sidebar_state at first paint per rerun, which is exactly
+# what we want — flipping the flag + st.rerun() triggers a re-paint with the
+# sidebar opened.
+_initial_sidebar = (
+    "expanded"
+    if st.session_state.get("quota_blocked", False)
+    else "expanded"   # default for desktop; toggle is always visible
+)
+
 st.set_page_config(
     page_title="Mind Companion",
     page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state=_initial_sidebar,
     menu_items={
         "About": (
             "Mind Companion — a student RAG project demonstrating empathic "
@@ -63,8 +74,20 @@ CUSTOM_CSS = """
        ============================================================ */
     html { scroll-behavior: smooth; }
 
-    /* Hide the default Streamlit chrome we don't need */
-    #MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; }
+    /* Hide Streamlit's hamburger menu and "Made with Streamlit" footer,
+       but keep the header itself so the sidebar toggle button remains. */
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    header[data-testid="stHeader"] {
+        background: transparent;
+    }
+    /* Keep the sidebar collapse/expand toggle clearly visible */
+    button[data-testid="stSidebarCollapseButton"],
+    button[data-testid="stBaseButton-headerNoPadding"],
+    [data-testid="stSidebarCollapsedControl"] {
+        visibility: visible !important;
+        z-index: 999;
+    }
 
     /* Tighten the main container */
     .block-container {
@@ -356,6 +379,49 @@ CUSTOM_CSS = """
     [data-testid="stChatMessage"] {
         animation: message-fade-in 0.3s ease-out;
     }
+
+    /* ============================================================
+       Quota-blocked highlight — pulsing teal border + arrow
+       Applied to the API key block in the sidebar when the shared
+       key has been exhausted.
+       ============================================================ */
+    .api-key-prompt {
+        position: relative;
+        padding: 0.9rem 1rem;
+        margin: 0.5rem 0 1rem;
+        border-radius: 12px;
+        background: linear-gradient(135deg,
+            rgba(16, 185, 129, 0.12),
+            rgba(16, 185, 129, 0.04));
+        border: 2px solid #10b981;
+        color: #d1fae5;
+        font-size: 0.85rem;
+        line-height: 1.45;
+        animation: pulse-glow 2s ease-in-out infinite;
+    }
+    .api-key-prompt::before {
+        content: "👇";
+        position: absolute;
+        bottom: -22px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 1.4rem;
+        animation: bounce-down 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse-glow {
+        0%, 100% {
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6),
+                        0 0 14px rgba(16, 185, 129, 0.25);
+        }
+        50% {
+            box-shadow: 0 0 0 6px rgba(16, 185, 129, 0),
+                        0 0 24px rgba(16, 185, 129, 0.45);
+        }
+    }
+    @keyframes bounce-down {
+        0%, 100% { transform: translate(-50%, 0); }
+        50%      { transform: translate(-50%, 6px); }
+    }
 </style>
 """
 
@@ -483,17 +549,58 @@ def render_sidebar() -> dict:
 
         # --- API key ----------------------------------------------------
         st.markdown("### 🔑 API key")
+
+        # If the shared key just hit quota, show a prominent prompt right
+        # above the input field so the user knows where to act.
+        if st.session_state.get("quota_blocked", False):
+            st.markdown(
+                """
+                <div class="api-key-prompt">
+                    <strong>🪫 Shared key quota exhausted.</strong><br>
+                    Paste your own free Gemini key below to keep chatting.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
         st.caption(
             "Paste your own Gemini key for the best experience. "
             "If left blank, a fallback key is used (rate limits apply)."
         )
-        user_key = st.text_input(
-            "Your Gemini API key",
-            type="password",
-            placeholder="AIza...",
-            label_visibility="collapsed",
-            key="user_api_key",
-        )
+
+        # Use a form so the key only registers when the user clicks Submit
+        # (or presses Enter in the field) — not on every keystroke.
+        with st.form("api_key_form", clear_on_submit=False):
+            key_input = st.text_input(
+                "Your Gemini API key",
+                type="password",
+                placeholder="AIza...",
+                label_visibility="collapsed",
+                value=st.session_state.get("submitted_api_key", ""),
+            )
+            col_submit, col_clear = st.columns([2, 1])
+            with col_submit:
+                submitted = st.form_submit_button(
+                    "Use my key", use_container_width=True
+                )
+            with col_clear:
+                cleared = st.form_submit_button(
+                    "Clear", use_container_width=True
+                )
+
+        if submitted and key_input.strip():
+            st.session_state.submitted_api_key = key_input.strip()
+            st.session_state.quota_blocked = False
+            st.success("✅ Your key is active for this session.")
+        elif submitted and not key_input.strip():
+            st.warning("Please paste a key before submitting.")
+        elif cleared:
+            st.session_state.submitted_api_key = ""
+            st.info("Cleared. Falling back to the shared key.")
+
+        # The actual key we'll use downstream — populated only after submit.
+        user_key = st.session_state.get("submitted_api_key", "")
+
         st.caption(
             "Get a free key at "
             "[aistudio.google.com/apikey](https://aistudio.google.com/apikey). "
@@ -658,6 +765,20 @@ def main() -> None:
         st.session_state.active_key_source = None
     if "quota_blocked" not in st.session_state:
         st.session_state.quota_blocked = False
+    if "submitted_api_key" not in st.session_state:
+        st.session_state.submitted_api_key = ""
+
+    # Top-of-page banner when the shared key has hit quota — visible even
+    # before the user looks at the sidebar.
+    if st.session_state.quota_blocked:
+        st.warning(
+            "🪫 **The shared API key has hit its daily quota.** "
+            "Please paste your own free Gemini key in the sidebar on the "
+            "left (under **🔑 API key**) to keep chatting. "
+            "Get one in 30 seconds at "
+            "[aistudio.google.com/apikey](https://aistudio.google.com/apikey).",
+            icon="⚠️",
+        )
 
     settings = render_sidebar()
 
@@ -767,18 +888,16 @@ def main() -> None:
                 # recover, and remember the state so the banner persists across
                 # reruns until they paste a key or refresh.
                 st.session_state.quota_blocked = True
-                st.warning(
-                    "🪫 **The shared API key has hit its daily quota.**\n\n"
-                    "To keep chatting right now, paste your own free Gemini "
-                    "key in the **🔑 API key** section of the sidebar on the "
-                    "left. Get one in 30 seconds at "
-                    "[aistudio.google.com/apikey](https://aistudio.google.com/apikey)."
-                )
+                # Roll back the user's turn so they can retry without duplicates
+                st.session_state.history.pop()
+                st.session_state.messages.pop()
+                # Force rerun so the sidebar re-opens with the highlighted
+                # API key prompt visible.
+                st.rerun()
             else:
                 st.error(f"Something went wrong: {e}")
-            # Roll back the user's turn so they can retry without duplicates
-            st.session_state.history.pop()
-            st.session_state.messages.pop()
+                st.session_state.history.pop()
+                st.session_state.messages.pop()
             return
 
         placeholder.empty()
