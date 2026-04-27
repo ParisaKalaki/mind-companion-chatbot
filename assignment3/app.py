@@ -363,6 +363,22 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # ===========================================================================
+# Quota-error detection
+# ===========================================================================
+def _is_quota_error(exc: Exception) -> bool:
+    """
+    Heuristic: did Gemini fail because the API key has hit its quota /
+    rate limit? Google's SDK raises errors with text like:
+        429 RESOURCE_EXHAUSTED
+        quota exceeded
+        rate limit
+    """
+    msg = (str(exc) or "").lower()
+    needles = ("429", "resource_exhausted", "quota", "rate limit", "rate-limit")
+    return any(n in msg for n in needles)
+
+
+# ===========================================================================
 # Bootstrap — download large artifacts on first Streamlit Cloud boot
 # ===========================================================================
 def _bootstrap_artifacts() -> None:
@@ -445,7 +461,6 @@ def render_hero() -> None:
                 health techniques.
             </p>
             <div class="hero-badges">
-                <span class="hero-badge">⚡ Gemini 2.5 Flash</span>
                 <span class="hero-badge">📚 RAG over Counsel Chat</span>
                 <span class="hero-badge">🛡️ Crisis-aware routing</span>
                 <span class="hero-badge">🇦🇺 AU resources</span>
@@ -641,6 +656,8 @@ def main() -> None:
         st.session_state.messages = []
     if "active_key_source" not in st.session_state:
         st.session_state.active_key_source = None
+    if "quota_blocked" not in st.session_state:
+        st.session_state.quota_blocked = False
 
     settings = render_sidebar()
 
@@ -672,6 +689,10 @@ def main() -> None:
         try:
             rag.set_gemini_client(api_key)
             st.session_state.active_key_source = key_source
+            # If we were previously quota-blocked and the user has now pasted
+            # their own key, clear the banner state.
+            if key_source == "user":
+                st.session_state.quota_blocked = False
         except Exception as e:
             st.error(f"Failed to initialize Gemini client: {e}")
             st.stop()
@@ -740,7 +761,22 @@ def main() -> None:
                 k_kb=settings["k_kb"],
             )
         except Exception as e:
-            placeholder.error(f"Something went wrong: {e}")
+            placeholder.empty()
+            if _is_quota_error(e):
+                # Friendly UX: don't dump the raw 429. Tell the user how to
+                # recover, and remember the state so the banner persists across
+                # reruns until they paste a key or refresh.
+                st.session_state.quota_blocked = True
+                st.warning(
+                    "🪫 **The shared API key has hit its daily quota.**\n\n"
+                    "To keep chatting right now, paste your own free Gemini "
+                    "key in the **🔑 API key** section of the sidebar on the "
+                    "left. Get one in 30 seconds at "
+                    "[aistudio.google.com/apikey](https://aistudio.google.com/apikey)."
+                )
+            else:
+                st.error(f"Something went wrong: {e}")
+            # Roll back the user's turn so they can retry without duplicates
             st.session_state.history.pop()
             st.session_state.messages.pop()
             return
