@@ -1,0 +1,14 @@
+# Place this file at: <project_root>/.streamlit/config.toml
+# Locks the app to dark theme with teal accents, regardless of the
+# user's system or browser preference. Streamlit reads this on launch.
+
+[theme]
+base = "dark"
+primaryColor = "#10b981"            # teal-500 — slider tracks, focus rings
+backgroundColor = "#0a0e14"          # very dark slate, almost black
+secondaryBackgroundColor = "#141a23" # sidebar / cards
+textColor = "#e8eef5"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false

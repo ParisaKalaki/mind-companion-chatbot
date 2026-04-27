@@ -12,6 +12,7 @@ Deploy to Streamlit Cloud:
     3. In the app's "Secrets" page, add:
             GEMINI_API_KEY = "your_fallback_key_here"
     4. Make sure requirements.txt is in the repo root
+    5. Make sure .streamlit/config.toml is in the repo (locks dark theme)
 
 API key resolution order (highest priority first):
     1. User-pasted key in the sidebar (per-session, never written to disk)
@@ -20,38 +21,351 @@ API key resolution order (highest priority first):
 """
 
 import os
+import time
 
 import streamlit as st
 
 # Pull GEMINI_API_KEY from Streamlit secrets BEFORE importing rag so its
-# import-time .env load picks it up via os.environ. This matters on
-# Streamlit Cloud where there's no .env file.
+# import-time .env load picks it up via os.environ.
 try:
     if "GEMINI_API_KEY" in st.secrets:
         os.environ.setdefault("GEMINI_API_KEY", st.secrets["GEMINI_API_KEY"])
 except (FileNotFoundError, st.errors.StreamlitSecretNotFoundError):
-    # st.secrets may raise locally if no secrets.toml exists — that's fine,
-    # we'll fall back to .env via rag.py's load_dotenv.
     pass
 
-import rag  # noqa: E402  — must come after the secrets/env handling above
+import rag  # noqa: E402
 
 
 # ===========================================================================
 # Page config
 # ===========================================================================
 st.set_page_config(
-    page_title="Mind Companion — Mental Health Support",
+    page_title="Mind Companion",
     page_icon="🧠",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="expanded",
+    menu_items={
+        "About": (
+            "Mind Companion — a student RAG project demonstrating empathic "
+            "AI support. Not a replacement for professional mental health care."
+        ),
+    },
 )
 
 
 # ===========================================================================
-# Component caching — heavy loads happen once per Streamlit session
+# Custom CSS — dark theme polish, teal accents, animations
 # ===========================================================================
-@st.cache_resource(show_spinner="Loading models (one-time, ~10 seconds) ...")
+CUSTOM_CSS = """
+<style>
+    /* ============================================================
+       Global resets + smooth scroll
+       ============================================================ */
+    html { scroll-behavior: smooth; }
+
+    /* Hide the default Streamlit chrome we don't need */
+    #MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; }
+
+    /* Tighten the main container */
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 6rem !important;
+        max-width: 900px;
+    }
+
+    /* ============================================================
+       Hero header
+       ============================================================ */
+    .hero {
+        position: relative;
+        padding: 2.4rem 2rem 2rem;
+        margin-bottom: 1.5rem;
+        border-radius: 24px;
+        background:
+            radial-gradient(circle at 20% 0%, rgba(16, 185, 129, 0.18) 0%, transparent 55%),
+            radial-gradient(circle at 100% 100%, rgba(45, 212, 191, 0.12) 0%, transparent 55%),
+            linear-gradient(135deg, #111821 0%, #0d1218 100%);
+        border: 1px solid rgba(16, 185, 129, 0.18);
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+        overflow: hidden;
+    }
+    .hero::before {
+        content: "";
+        position: absolute;
+        top: -50%; right: -20%;
+        width: 400px; height: 400px;
+        background: radial-gradient(circle, rgba(16, 185, 129, 0.12) 0%, transparent 70%);
+        filter: blur(40px);
+        pointer-events: none;
+    }
+    .hero-title {
+        font-size: 2.4rem;
+        font-weight: 700;
+        margin: 0;
+        background: linear-gradient(135deg, #10b981 0%, #34d399 50%, #6ee7b7 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        letter-spacing: -0.02em;
+    }
+    .hero-subtitle {
+        margin: 0.5rem 0 0;
+        color: #9ca3af;
+        font-size: 1.05rem;
+        max-width: 620px;
+        line-height: 1.5;
+    }
+    .hero-badges {
+        margin-top: 1.2rem;
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    .hero-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.35rem 0.7rem;
+        font-size: 0.78rem;
+        font-weight: 500;
+        color: #6ee7b7;
+        background: rgba(16, 185, 129, 0.08);
+        border: 1px solid rgba(16, 185, 129, 0.25);
+        border-radius: 999px;
+    }
+
+    /* ============================================================
+       Chat bubbles — full custom replacement
+       ============================================================ */
+    [data-testid="stChatMessage"] {
+        background: transparent !important;
+        padding: 0.5rem 0 !important;
+        border: none !important;
+    }
+
+    /* User bubble */
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
+        [data-testid="stChatMessageContent"] {
+        background: linear-gradient(135deg, #064e3b 0%, #047857 100%);
+        border: 1px solid rgba(16, 185, 129, 0.35);
+        border-radius: 18px 18px 4px 18px;
+        padding: 0.9rem 1.1rem !important;
+        margin-left: auto;
+        max-width: 75%;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);
+        transition: all 0.2s ease;
+    }
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
+        [data-testid="stChatMessageContent"]:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(16, 185, 129, 0.22);
+    }
+
+    /* Assistant bubble */
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"])
+        [data-testid="stChatMessageContent"] {
+        background: linear-gradient(135deg, #1a2129 0%, #141a23 100%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px 18px 18px 4px;
+        padding: 1rem 1.2rem !important;
+        max-width: 85%;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        transition: all 0.2s ease;
+    }
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"])
+        [data-testid="stChatMessageContent"]:hover {
+        border-color: rgba(16, 185, 129, 0.25);
+    }
+
+    /* Crisis-route assistant bubble — softer red border */
+    .crisis-bubble [data-testid="stChatMessageContent"] {
+        border-color: rgba(248, 113, 113, 0.4) !important;
+        background: linear-gradient(135deg, #2a1518 0%, #1a0f12 100%) !important;
+    }
+
+    /* ============================================================
+       Route pill — sits above each assistant message
+       ============================================================ */
+    .route-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.25rem 0.65rem;
+        margin-bottom: 0.5rem;
+        font-size: 0.72rem;
+        font-weight: 500;
+        border-radius: 999px;
+        letter-spacing: 0.02em;
+    }
+    .route-pill.rag {
+        color: #6ee7b7;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .route-pill.crisis {
+        color: #fca5a5;
+        background: rgba(248, 113, 113, 0.1);
+        border: 1px solid rgba(248, 113, 113, 0.35);
+    }
+    .route-pill.fallback {
+        color: #9ca3af;
+        background: rgba(156, 163, 175, 0.1);
+        border: 1px solid rgba(156, 163, 175, 0.25);
+    }
+
+    /* ============================================================
+       Sidebar polish
+       ============================================================ */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0d1218 0%, #0a0e14 100%);
+        border-right: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3 {
+        background: linear-gradient(90deg, #10b981, #34d399);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 600;
+    }
+
+    /* Crisis resources block in sidebar — styled card */
+    .crisis-card {
+        padding: 1rem;
+        border-radius: 12px;
+        background: linear-gradient(135deg, rgba(248, 113, 113, 0.08), rgba(248, 113, 113, 0.03));
+        border: 1px solid rgba(248, 113, 113, 0.25);
+        margin: 0.5rem 0;
+    }
+    .crisis-card-title {
+        color: #fca5a5;
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-bottom: 0.6rem;
+    }
+    .crisis-card-line {
+        font-size: 0.85rem;
+        color: #d1d5db;
+        margin: 0.25rem 0;
+    }
+    .crisis-card-line strong { color: #fef2f2; }
+
+    /* ============================================================
+       Buttons + inputs
+       ============================================================ */
+    .stButton > button {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        padding: 0.55rem 1.2rem;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 8px rgba(16, 185, 129, 0.25);
+    }
+    .stButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
+        background: linear-gradient(135deg, #059669 0%, #047857 100%);
+    }
+    .stButton > button:active { transform: translateY(0); }
+
+    /* Chat input */
+    [data-testid="stChatInput"] {
+        background: #141a23 !important;
+        border: 1px solid rgba(16, 185, 129, 0.2) !important;
+        border-radius: 16px !important;
+        transition: border-color 0.2s ease;
+    }
+    [data-testid="stChatInput"]:focus-within {
+        border-color: rgba(16, 185, 129, 0.5) !important;
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
+    }
+
+    /* Sliders */
+    [data-baseweb="slider"] [role="slider"] {
+        background: #10b981 !important;
+        border-color: #10b981 !important;
+        box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25) !important;
+    }
+
+    /* Expanders */
+    [data-testid="stExpander"] {
+        background: rgba(20, 26, 35, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 10px;
+        margin-top: 0.5rem;
+    }
+    [data-testid="stExpander"] summary:hover {
+        background: rgba(16, 185, 129, 0.05);
+    }
+
+    /* ============================================================
+       Typing indicator (three bouncing dots)
+       ============================================================ */
+    .typing {
+        display: inline-flex;
+        gap: 5px;
+        padding: 0.6rem 0.4rem;
+    }
+    .typing span {
+        width: 8px; height: 8px;
+        background: #10b981;
+        border-radius: 50%;
+        opacity: 0.4;
+        animation: typing-bounce 1.4s infinite ease-in-out;
+    }
+    .typing span:nth-child(2) { animation-delay: 0.2s; }
+    .typing span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typing-bounce {
+        0%, 80%, 100% { transform: translateY(0);   opacity: 0.4; }
+        40%           { transform: translateY(-6px); opacity: 1.0; }
+    }
+
+    /* ============================================================
+       Source-card styling inside the citations expander
+       ============================================================ */
+    .source-card {
+        padding: 0.8rem 1rem;
+        margin: 0.5rem 0;
+        border-radius: 10px;
+        background: rgba(16, 185, 129, 0.04);
+        border-left: 3px solid #10b981;
+        font-size: 0.88rem;
+        line-height: 1.5;
+    }
+    .source-card.kb { border-left-color: #6ee7b7; }
+    .source-card-meta {
+        font-size: 0.75rem;
+        color: #9ca3af;
+        margin-bottom: 0.3rem;
+    }
+    .source-card-snippet {
+        color: #d1d5db;
+        font-style: italic;
+        margin-top: 0.4rem;
+        padding-left: 0.5rem;
+        border-left: 2px solid rgba(16, 185, 129, 0.3);
+    }
+
+    /* Fade-in animation for new messages */
+    @keyframes message-fade-in {
+        from { opacity: 0; transform: translateY(8px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    [data-testid="stChatMessage"] {
+        animation: message-fade-in 0.3s ease-out;
+    }
+</style>
+"""
+
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+# ===========================================================================
+# Component caching
+# ===========================================================================
+@st.cache_resource(show_spinner=False)
 def _load_components():
     """Trigger lazy load of rag.py components and cache for the session."""
     return rag.get_components()
@@ -61,10 +375,6 @@ def _load_components():
 # API key resolution
 # ===========================================================================
 def _resolve_api_key(user_pasted_key: str) -> tuple[str | None, str]:
-    """
-    Returns (api_key, source_label) where source_label is one of:
-        "user", "secrets", "env", "missing".
-    """
     if user_pasted_key and user_pasted_key.strip():
         return user_pasted_key.strip(), "user"
     try:
@@ -79,21 +389,45 @@ def _resolve_api_key(user_pasted_key: str) -> tuple[str | None, str]:
 
 
 # ===========================================================================
+# Hero header
+# ===========================================================================
+def render_hero() -> None:
+    st.markdown(
+        """
+        <div class="hero">
+            <h1 class="hero-title">🧠 Mind Companion</h1>
+            <p class="hero-subtitle">
+                A warm, careful AI support presence. Powered by retrieval-augmented
+                generation over real counselor conversations and curated mental
+                health techniques.
+            </p>
+            <div class="hero-badges">
+                <span class="hero-badge">⚡ Gemini 2.5 Flash</span>
+                <span class="hero-badge">📚 RAG over Counsel Chat</span>
+                <span class="hero-badge">🛡️ Crisis-aware routing</span>
+                <span class="hero-badge">🇦🇺 AU resources</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ===========================================================================
 # Sidebar
 # ===========================================================================
 def render_sidebar() -> dict:
-    """Render the sidebar and return the current settings dict."""
     with st.sidebar:
-        st.markdown("## 🧠 Mind Companion")
-        st.caption("An empathic AI support companion — not a therapist.")
+        st.markdown("## Mind Companion")
+        st.caption("Empathic support, not therapy.")
 
         st.divider()
 
-        # --- API key block --------------------------------------------------
-        st.markdown("### 🔑 Gemini API Key")
+        # --- API key ----------------------------------------------------
+        st.markdown("### 🔑 API key")
         st.caption(
-            "Paste your own key for the best experience. "
-            "If left blank, the app will use a fallback key (rate limits apply)."
+            "Paste your own Gemini key for the best experience. "
+            "If left blank, a fallback key is used (rate limits apply)."
         )
         user_key = st.text_input(
             "Your Gemini API key",
@@ -105,12 +439,12 @@ def render_sidebar() -> dict:
         st.caption(
             "Get a free key at "
             "[aistudio.google.com/apikey](https://aistudio.google.com/apikey). "
-            "Your key is kept only for this browser session."
+            "Stored only in this browser session."
         )
 
         st.divider()
 
-        # --- Tuning controls ------------------------------------------------
+        # --- Settings ---------------------------------------------------
         st.markdown("### ⚙️ Settings")
         k_counsel = st.slider(
             "Counsel Chat passages retrieved",
@@ -127,47 +461,50 @@ def render_sidebar() -> dict:
             min_value=0.1, max_value=0.9, value=0.5, step=0.05,
             help=(
                 "Lower = more sensitive (catches more crisis messages, "
-                "but also more false positives). 0.5 is the default."
+                "but also more false positives)."
             ),
         )
 
         st.divider()
 
-        # --- Conversation controls -----------------------------------------
+        # --- Conversation ----------------------------------------------
         st.markdown("### 💬 Conversation")
         if st.button("Clear conversation", use_container_width=True):
             st.session_state.history = []
             st.session_state.messages = []
             st.rerun()
-
-        st.caption(f"Messages so far: {len(st.session_state.get('history', []))}")
+        st.caption(f"Messages this session: {len(st.session_state.get('history', []))}")
 
         st.divider()
 
-        # --- Always-visible crisis resources -------------------------------
-        st.markdown("### 🆘 If you're in crisis (Australia)")
+        # --- Crisis resources ------------------------------------------
         st.markdown(
-            "**000** — immediate danger\n\n"
-            "**Lifeline** — 13 11 14 (24/7)\n\n"
-            "**Beyond Blue** — 1300 22 4636\n\n"
-            "**Suicide Call Back** — 1300 659 467\n\n"
-            "**13YARN** — 13 92 76\n\n"
-            "**Kids Helpline** — 1800 55 1800"
+            """
+            <div class="crisis-card">
+                <div class="crisis-card-title">🆘 If you're in crisis (Australia)</div>
+                <div class="crisis-card-line"><strong>000</strong> — immediate danger</div>
+                <div class="crisis-card-line"><strong>Lifeline</strong> — 13 11 14</div>
+                <div class="crisis-card-line"><strong>Beyond Blue</strong> — 1300 22 4636</div>
+                <div class="crisis-card-line"><strong>Suicide Call Back</strong> — 1300 659 467</div>
+                <div class="crisis-card-line"><strong>13YARN</strong> — 13 92 76</div>
+                <div class="crisis-card-line"><strong>Kids Helpline</strong> — 1800 55 1800</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         st.divider()
 
-        # --- About ----------------------------------------------------------
         with st.expander("ℹ️ About this app"):
             st.markdown(
-                "This is a student project demonstrating retrieval-augmented "
-                "generation (RAG) for mental health support. It combines:\n\n"
+                "Student project demonstrating retrieval-augmented generation "
+                "for mental health support. It combines:\n\n"
                 "- a fine-tuned **DistilBERT crisis classifier** that "
                 "routes urgent messages to safety resources,\n"
                 "- a **ChromaDB** vector store over Counsel Chat Q&A and "
                 "curated CBT/mindfulness/psychoed entries,\n"
                 "- **Google Gemini 2.5 Flash** for empathic, grounded replies.\n\n"
-                "**This tool does not provide diagnosis or treatment.** "
+                "**Not a substitute for professional care.** "
                 "If you are struggling, please reach out to a qualified "
                 "mental health professional."
             )
@@ -181,14 +518,59 @@ def render_sidebar() -> dict:
 
 
 # ===========================================================================
-# Message rendering helpers
+# Message rendering
 # ===========================================================================
-def _render_assistant_message(result: dict) -> None:
-    """Render a stored assistant turn from session_state, including extras."""
-    is_crisis = result.get("path") == "crisis"
+def _render_route_pill(result: dict) -> None:
+    path = result.get("path", "rag")
+    classifier = result.get("classifier")
 
-    if is_crisis:
-        # Subtle indicator that the safety branch fired
+    if path == "crisis":
+        conf = classifier.get("confidence", 0) if classifier else 0
+        label = f"🚨 Crisis pathway · classifier {conf:.0%}"
+        klass = "crisis"
+    elif path == "fallback":
+        label = "💭 Empty input — gentle fallback"
+        klass = "fallback"
+    else:
+        conf = classifier.get("confidence", 0) if classifier else 0
+        n_sources = len(result.get("sources") or [])
+        label = f"💬 RAG · classifier {conf:.0%} · {n_sources} sources cited"
+        klass = "rag"
+
+    st.markdown(
+        f'<span class="route-pill {klass}">{label}</span>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_sources(sources: list[dict]) -> None:
+    if not sources:
+        return
+    with st.expander(f"📎 Sources cited ({len(sources)})"):
+        for i, s in enumerate(sources, 1):
+            src     = s.get("source", "?")
+            topic   = s.get("topic_or_category", "?")
+            snippet = (s.get("text", "") or "")[:220]
+            sim     = s.get("similarity", 0.0)
+            badge   = "💬 Counsel Chat" if src == "counsel_chat" else "📘 Knowledge Base"
+            css_class = "source-card" if src == "counsel_chat" else "source-card kb"
+            st.markdown(
+                f"""
+                <div class="{css_class}">
+                    <div class="source-card-meta">
+                        <strong>{i}.</strong> {badge} · {topic} · similarity {sim:.2f}
+                    </div>
+                    <div class="source-card-snippet">{snippet}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def _render_assistant_message(result: dict) -> None:
+    _render_route_pill(result)
+
+    if result.get("path") == "crisis":
         st.warning(
             "Safety resources are shown below because this message was "
             "routed through our crisis support pathway."
@@ -196,26 +578,11 @@ def _render_assistant_message(result: dict) -> None:
 
     st.markdown(result["text"])
 
-    # Sources (collapsed by default) — only for RAG path with citations
-    sources = result.get("sources") or []
-    if sources:
-        with st.expander(f"📎 Sources cited ({len(sources)})"):
-            for i, s in enumerate(sources, 1):
-                src     = s.get("source", "?")
-                topic   = s.get("topic_or_category", "?")
-                snippet = s.get("text", "")[:200]
-                sim     = s.get("similarity", 0.0)
-                badge   = "💬 Counsel Chat" if src == "counsel_chat" else "📘 Knowledge Base"
-                st.markdown(
-                    f"**{i}. {badge}** — *{topic}* "
-                    f"(similarity {sim:.2f})\n\n"
-                    f"> {snippet}"
-                )
+    _render_sources(result.get("sources") or [])
 
-    # Classifier info (collapsed) — useful for the demo
     classifier = result.get("classifier")
     if classifier:
-        with st.expander("🔬 Classifier output"):
+        with st.expander("🔬 Classifier details"):
             st.json(classifier)
 
 
@@ -223,17 +590,8 @@ def _render_assistant_message(result: dict) -> None:
 # Main
 # ===========================================================================
 def main() -> None:
-    # --- Header -------------------------------------------------------------
-    st.title("🧠 Mind Companion")
-    st.caption(
-        "A retrieval-augmented support companion. Not a therapist, not a "
-        "diagnosis — a thoughtful presence that listens and shares "
-        "evidence-informed ideas."
-    )
+    render_hero()
 
-    # --- Init session state -------------------------------------------------
-    # `history` is what we pass into rag.respond (just role+content).
-    # `messages` is what we render (full result dicts for assistant turns).
     if "history" not in st.session_state:
         st.session_state.history = []
     if "messages" not in st.session_state:
@@ -241,7 +599,6 @@ def main() -> None:
     if "active_key_source" not in st.session_state:
         st.session_state.active_key_source = None
 
-    # --- Sidebar ------------------------------------------------------------
     settings = render_sidebar()
 
     # --- Resolve API key ----------------------------------------------------
@@ -253,8 +610,6 @@ def main() -> None:
         )
         st.stop()
 
-    # If the key source changed since last run, swap the Gemini client.
-    # (rag.set_gemini_client triggers component load on first call.)
     if key_source != st.session_state.active_key_source or key_source == "user":
         try:
             rag.set_gemini_client(api_key)
@@ -263,58 +618,97 @@ def main() -> None:
             st.error(f"Failed to initialize Gemini client: {e}")
             st.stop()
 
-    # --- Trigger heavy component load (cached) ------------------------------
+    # --- Heavy components (cached) ------------------------------------------
     try:
-        _load_components()
+        with st.spinner("⚡ Warming up models ..."):
+            _load_components()
     except FileNotFoundError as e:
         st.error(
             f"Required artifacts missing: {e}\n\n"
-            "Make sure you've run dataset.py, clean.py, download_model.py, "
-            "and the indexing notebook cells before launching the app."
+            "Run dataset.py, clean.py, download_model.py, and the indexing "
+            "notebook cells before launching the app."
         )
         st.stop()
 
+    # --- Empty state --------------------------------------------------------
+    if not st.session_state.messages:
+        st.markdown(
+            """
+            <div style="text-align:center; padding: 3rem 1rem; color:#6b7280;">
+                <div style="font-size:2.5rem; margin-bottom:0.8rem;">💚</div>
+                <div style="font-size:1.05rem; margin-bottom:0.3rem; color:#9ca3af;">
+                    What's on your mind?
+                </div>
+                <div style="font-size:0.85rem;">
+                    Anything from a passing thought to something that's been weighing on you.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     # --- Render conversation history ----------------------------------------
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            if msg["role"] == "assistant":
+        role = msg["role"]
+        avatar = "🧑" if role == "user" else "🧠"
+        is_crisis = (role == "assistant"
+                     and msg.get("result", {}).get("path") == "crisis")
+
+        if is_crisis:
+            st.markdown('<div class="crisis-bubble">', unsafe_allow_html=True)
+
+        with st.chat_message(role, avatar=avatar):
+            if role == "assistant":
                 _render_assistant_message(msg["result"])
             else:
                 st.markdown(msg["content"])
 
+        if is_crisis:
+            st.markdown('</div>', unsafe_allow_html=True)
+
     # --- Chat input ---------------------------------------------------------
-    user_msg = st.chat_input("How are you feeling today?")
+    user_msg = st.chat_input("Share what's on your mind ...")
     if not user_msg:
         return
 
-    # Show user's turn immediately
-    with st.chat_message("user"):
+    # User turn
+    with st.chat_message("user", avatar="🧑"):
         st.markdown(user_msg)
     st.session_state.messages.append({"role": "user", "content": user_msg})
     st.session_state.history.append({"role": "user", "content": user_msg})
 
-    # Generate assistant reply
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking ..."):
-            try:
-                result = rag.respond(
-                    user_msg,
-                    history=st.session_state.history[:-1],  # exclude the just-added user msg
-                    crisis_threshold=settings["crisis_threshold"],
-                    k_counsel=settings["k_counsel"],
-                    k_kb=settings["k_kb"],
-                )
-            except Exception as e:
-                st.error(f"Something went wrong: {e}")
-                # Don't append a broken assistant turn to history
-                st.session_state.history.pop()  # remove the user msg too
-                return
+    # Assistant turn — typing indicator + actual call
+    with st.chat_message("assistant", avatar="🧠"):
+        placeholder = st.empty()
+        placeholder.markdown(
+            '<div class="typing"><span></span><span></span><span></span></div>',
+            unsafe_allow_html=True,
+        )
 
+        try:
+            result = rag.respond(
+                user_msg,
+                history=st.session_state.history[:-1],
+                crisis_threshold=settings["crisis_threshold"],
+                k_counsel=settings["k_counsel"],
+                k_kb=settings["k_kb"],
+            )
+        except Exception as e:
+            placeholder.error(f"Something went wrong: {e}")
+            st.session_state.history.pop()
+            st.session_state.messages.pop()
+            return
+
+        placeholder.empty()
         _render_assistant_message(result)
 
-    # Persist the assistant turn
     st.session_state.messages.append({"role": "assistant", "result": result})
     st.session_state.history.append({"role": "assistant", "content": result["text"]})
+
+    # Trigger a rerun so the crisis-bubble wrapper is applied uniformly
+    # to the just-added message on next render.
+    time.sleep(0.05)
+    st.rerun()
 
 
 if __name__ == "__main__":
