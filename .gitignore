@@ -3,7 +3,7 @@
 
 # Mac OS-specific storage files
 .DS_Store
-
+kaggle_api.txt
 # vim
 *.swp
 *.swo
@@ -188,4 +188,8 @@ cython_debug/
 .ruff_cache/
 
 # PyPI configuration file
-.pypirc
+.pypircdata/processed/crisis_train.csv
+data/processed/crisis_val.csv
+data/processed/crisis_test.csv
+models/
+.vscode/

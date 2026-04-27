@@ -20,7 +20,7 @@ Embedding is used to query a vector database (ChromaDB / FAISS) built from the C
 
 
 
-## Team B (William, Taison, Vivek) Deadline 4 May 2026
+## Team B (William, Taison, Vivek) Deadline 4 May 2026 
 
 
 

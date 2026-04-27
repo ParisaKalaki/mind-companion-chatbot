@@ -1,0 +1,9 @@
+langchain
+chromadb
+sentence-transformers
+groq
+gradio
+python-dotenv
+pandas
+scikit-learn
+datasets
