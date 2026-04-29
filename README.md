@@ -6,7 +6,7 @@
 
 A retrieval-augmented mental health support chatbot built for AI Assignment 3.
 
-The system combines a fine-tuned **DistilBERT crisis classifier** that routes urgent messages to safety resources, a **ChromaDB** vector store over the Counsel Chat dataset and a curated CBT/mindfulness/psychoeducation knowledge base, and **Google Gemini 2.5 Flash** for empathic, grounded replies. The frontend is a **Streamlit** chat UI with a dark theme and live tuning controls.
+The system combines a fine-tuned **DistilBERT crisis classifier** that routes urgent messages to safety resources, a **ChromaDB** vector store over the Counsel Chat dataset and a curated CBT/mindfulness/psychoeducation knowledge base, and **Google Gemini 2.5 Flash** for empathic, grounded replies. The frontend is a **Streamlit** chat UI with a dark theme, live tuning controls, and a three-tier API key resolution system (user-paste → Streamlit secrets → `.env`).
 
 > **Disclaimer.** This is a student project. It is not a substitute for professional mental health care. If you or someone you know is in crisis, contact your local emergency services or a crisis helpline. Australian resources are surfaced in the app sidebar.
 
@@ -51,6 +51,7 @@ Everything routes through a single `respond(message, history)` entry point in `r
 ```
 assignment3/
 ├── README.md                       <- This file
+├── TEAM_BRIEFING.md                <- In-depth design decisions for teammates / report
 ├── LICENSE
 ├── Makefile                        <- (template — optional)
 ├── pyproject.toml                  <- Poetry project & dependency definition
@@ -62,7 +63,9 @@ assignment3/
 │
 ├── data/
 │   ├── external/
-│   │   └── knowledge_base.json     <- Curated CBT / mindfulness / psychoed entries
+│   │   └── knowledge_base.json     <- Curated CBT / mindfulness / psychoed
+│   │                                  (auto-downloaded from Google Drive
+│   │                                  by build_index.py if missing)
 │   ├── interim/
 │   ├── processed/
 │   │   ├── counsel_chat_clean.csv  <- Cleaned RAG corpus
@@ -79,15 +82,15 @@ assignment3/
 ├── models/
 │   ├── chroma_db/                  <- Persistent ChromaDB (counsel_chat + knowledge_base)
 │   └── crisis_classifier/          <- Fine-tuned DistilBERT weights
-│       ├── config.json
-│       ├── model.safetensors
+│       ├── config.json             <- (auto-downloaded from Google Drive
+│       ├── model.safetensors          by download_model.py if missing)
 │       ├── tokenizer.json
 │       ├── tokenizer_config.json
 │       └── training_args.bin
 │
 ├── notebooks/
 │   ├── 0_main.ipynb                <- End-to-end walk-through
-│   └── 1_setup.ipynb               <- One-off setup cells (incl. Chroma index builds)
+│   └── 1_setup.ipynb               <- One-shot setup notebook (runs every step in order)
 │
 ├── reports/
 │   ├── crisis_classifier_results.csv
@@ -100,6 +103,7 @@ assignment3/
     ├── dataset.py                  <- Folder setup + Kaggle download
     ├── clean.py                    <- Text cleaning + train/val/test splits
     ├── download_model.py           <- Pulls trained classifier from Google Drive
+    ├── build_index.py              <- Builds the Chroma vector index (both collections)
     ├── rag.py                      <- The pipeline: clean → classify → route → retrieve → generate → log
     ├── app.py                      <- Streamlit UI
     └── modeling/
@@ -116,7 +120,7 @@ assignment3/
 ### 1. Clone and install
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/Doombuoyz/assignment3
 cd assignment3
 poetry install         # or: pip install -r requirements.txt
 ```
@@ -136,24 +140,37 @@ GEMINI_API_KEY=<your_gemini_api_key>
 
 `.env` should be in `.gitignore`. Never commit it.
 
-### 3. Get the data and the model
+### 3. One-shot setup (recommended)
+
+The simplest path: open `notebooks/1_setup.ipynb` and run all cells top-to-bottom. The notebook walks through dataset download, cleaning, classifier download, evaluation, vector index build, and a smoke test of `rag.py`.
+
+### 3b. (alternative) Run each step from the CLI
+
+If you'd rather skip the notebook, every step is also a standalone script:
 
 ```bash
-poetry run python dataset.py          # downloads suicide-watch dataset from Kaggle
-poetry run python clean.py            # cleans and splits the data
-poetry run python download_model.py   # downloads pre-trained classifier from Google Drive
+poetry run python assignment3/dataset.py         # downloads suicide-watch dataset from Kaggle
+poetry run python assignment3/clean.py           # cleans data + builds train/val/test splits
+poetry run python assignment3/download_model.py  # downloads pre-trained classifier from Google Drive
+poetry run python assignment3/build_index.py     # builds the Chroma vector index
+                                                  #   (auto-downloads knowledge_base.json
+                                                  #    from Drive if not present locally)
 ```
 
-> If you'd rather train the classifier yourself, run `poetry run python modeling/train.py` instead. Takes ~10 min on GPU, longer on CPU.
+> If you'd rather train the classifier yourself, run `poetry run python assignment3/modeling/train.py` instead of `download_model.py`. Takes ~10 min on GPU, longer on CPU.
 
-### 4. Build the vector index
-
-The Chroma index is built from notebook cells (one-time setup). Open `notebooks/1_setup.ipynb` and run the cells in order. This creates `models/chroma_db/` with two collections (`counsel_chat`, `knowledge_base`).
-
-### 5. Run the app
+`build_index.py` is idempotent — re-runs are safe and cheap. Useful flags:
 
 ```bash
-poetry run streamlit run app.py
+poetry run python assignment3/build_index.py --force      # wipe and rebuild both collections
+poetry run python assignment3/build_index.py --counsel    # only rebuild counsel_chat
+poetry run python assignment3/build_index.py --kb         # only rebuild knowledge_base
+```
+
+### 4. Run the app
+
+```bash
+poetry run streamlit run assignment3/app.py
 ```
 
 Opens at http://localhost:8501. First message takes ~10 seconds (model warmup); subsequent messages are ~1-2 seconds.
@@ -168,7 +185,7 @@ The Streamlit sidebar exposes three sliders that affect retrieval and routing in
 - **Knowledge base entries retrieved** (0–5, default 2) — curated CBT / mindfulness / psychoed
 - **Crisis classifier threshold** (0.1–0.9, default 0.5) — lower = more sensitive routing to safety pathway
 
-The sidebar also accepts a user-pasted Gemini API key for per-session use without modifying `.env`.
+The sidebar also accepts a user-pasted Gemini API key (with a Submit / Clear form) for per-session use without modifying `.env`. The app falls back gracefully through three tiers: user-pasted key → `st.secrets` → `.env`. When the shared key hits its quota, the app auto-opens the sidebar and prompts the user to paste their own key.
 
 ---
 
@@ -180,24 +197,29 @@ The sidebar also accepts a user-pasted Gemini API key for per-session use withou
 | `dataset.py` | Validates `.env`, creates the data folder tree, downloads the Kaggle suicide-watch dataset. |
 | `clean.py` | Pulls Counsel Chat from HuggingFace, cleans both datasets, builds train/val/test splits. |
 | `download_model.py` | Pulls fine-tuned DistilBERT artifacts from Google Drive into `models/crisis_classifier/`. |
+| `build_index.py` | Builds the ChromaDB vector index (`counsel_chat` + `knowledge_base` collections). Auto-downloads `knowledge_base.json` from Google Drive if missing. |
 | `modeling/train.py` | Fine-tunes DistilBERT on `crisis_train.csv` with `AutoTokenizer` / `AutoModel`. |
 | `modeling/evaluate.py` | Test-set metrics + confusion matrix → `reports/`. |
 | `modeling/predict.py` | Standalone `is_crisis()` for ad-hoc inference. |
 | `rag.py` | The pipeline: `respond(msg, history)` orchestrates cleaning, classification, retrieval, and generation. Lazy-loads all heavy components on first call. |
-| `app.py` | Streamlit chat UI. Imports `rag.respond`. Handles UI state, sidebar controls, and Gemini API key resolution. |
+| `app.py` | Streamlit chat UI. Imports `rag.respond`. Handles UI state, sidebar controls, the API key form, and Gemini quota recovery. |
 
 ---
 
 ## Deployment to Streamlit Cloud
 
-1. Push the repo to GitHub. Confirm `.env` is in `.gitignore`.
-2. Create a new app on https://share.streamlit.io pointing at `app.py`.
-3. In the app's **Secrets** page, add:
+The deployed instance lives at: https://ai-mind-companion.streamlit.app
+
+To deploy your own:
+
+1. Push the repo to GitHub. Confirm `.env` is in `.gitignore`. **Do not** commit `models/crisis_classifier/` (the classifier weights are ~265 MB — over GitHub's 100 MB per-file limit).
+2. Make sure `requirements.txt` and `.streamlit/config.toml` are in the repo root.
+3. Create a new app on https://share.streamlit.io pointing at `assignment3/app.py`.
+4. In the app's **Secrets** page, add:
    ```
    GEMINI_API_KEY = "your_fallback_key_here"
    ```
-4. Make sure `requirements.txt` and `.streamlit/config.toml` are in the repo root.
-5. The Chroma DB and DistilBERT weights are large binary artifacts. Either commit them via Git LFS or have the app download them on first boot.
+5. On first boot, the app calls `_bootstrap_artifacts()` which detects the missing classifier and runs `download_crisis_classifier()` to pull it from Google Drive (~30 seconds, one-time per fresh container). The `knowledge_base.json` file is similarly auto-fetched by `build_index.py` if needed.
 
 ---
 
@@ -214,6 +236,8 @@ The sidebar also accepts a user-pasted Gemini API key for per-session use withou
 **Why crisis_threshold = 0.5 instead of 0.7?** For a mental-health context, missing a real crisis is worse than over-flagging. Lowering the default threshold makes the classifier more sensitive at the cost of slightly more false positives — but a false positive just shows the user a list of helplines, while a false negative means missing someone in danger.
 
 **Why hardcode the crisis resources block?** The LLM writes the empathic acknowledgement (which adapts to what the user said), but the helpline numbers are concatenated verbatim from a constant. Phone numbers must never be paraphrased, hallucinated, or "improved" by the LLM. Wrong number = real harm.
+
+**Why three-tier API key resolution?** User-pasted (sidebar form) wins for the highest priority — keys never touch disk and a power user can dodge shared-key rate limits. Streamlit secrets is the deployment-time fallback. `.env` is the local-dev fallback. When the shared key hits its quota, the app catches the 429, auto-expands the sidebar, and prompts the user to paste their own key.
 
 ---
 
@@ -241,7 +265,7 @@ poetry install
 To add a new dependency:
 
 ```bash
-poetry add <package>           # runtime dep
+poetry add <package>               # runtime dep
 poetry add --group dev <package>   # dev-only dep
 ```
 
