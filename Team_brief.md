@@ -30,7 +30,7 @@
 
 ## 1. What we built (in one paragraph)
 
-A retrieval-augmented mental health support chatbot called **Mind Companion**. The user types a message; we clean it, classify it for crisis indicators using a fine-tuned DistilBERT model, and route it down one of two paths. **Crisis path:** Gemini writes a short empathic acknowledgement, we append a hardcoded list of Australian crisis helplines (never LLM-generated), and log the event for safety review. **RAG path:** we embed the message with `all-MiniLM-L6-v2`, retrieve top-k passages from a ChromaDB vector store containing the Counsel Chat dataset and a curated CBT/mindfulness/psychoeducation knowledge base, assemble a structured prompt with conversation history and retrieved context, and Gemini 2.5 Flash generates a grounded reply with inline source citations. The frontend is a Streamlit chat UI with a custom dark theme (teal accents), live tuning sliders, transparent source citations, and a three-tier API key resolution system. It's deployed on Streamlit Cloud.
+A retrieval-augmented mental health support chatbot called **Mind Companion**. The user types a message; we clean it, classify it for crisis indicators using a fine-tuned DistilBERT model, and route it down one of two paths. **Crisis path:** Gemini writes a short empathic acknowledgement, we append a hardcoded list of Australian crisis helplines (never LLM-generated), and log the event for safety review. **RAG path:** we embed the message with `all-MiniLM-L6-v2`, retrieve top-k passages from a ChromaDB vector store containing the Counsel Chat dataset and a curated CBT/mindfulness/psychoeducation knowledge base, assemble a structured prompt with conversation history and retrieved context, and Gemini 2.5 Flash generates a grounded reply with inline source citations. The frontend is a Streamlit chat UI with a custom dark theme (teal accents), live tuning sliders, transparent source citations, and a three-tier API key resolution system. It's deployed on Streamlit Cloud at https://ai-mind-companion.streamlit.app.
 
 ---
 
@@ -94,12 +94,13 @@ Everything routes through one entry point: `respond(user_message, history)` in `
 | `dataset.py` | ~100 | Validates `.env` has Kaggle credentials, creates the data folder tree, downloads the Kaggle suicide-watch dataset. Idempotent. |
 | `clean.py` | ~150 | Pulls Counsel Chat from HuggingFace, cleans both datasets (strips URLs, non-ASCII, normalizes whitespace), builds stratified 70/15/15 train/val/test splits for the crisis classifier. |
 | `download_model.py` | ~80 | Downloads the 5 fine-tuned DistilBERT artifacts from Google Drive into `models/crisis_classifier/`. Used both during local setup and during first boot on Streamlit Cloud. |
+| `build_index.py` | ~310 | Builds both Chroma collections (`counsel_chat`, `knowledge_base`) end-to-end. CLI flags (`--force`, `--counsel`, `--kb`) for selective rebuild. Auto-downloads `knowledge_base.json` from Google Drive if not present locally. |
 | `modelling/train.py` | ~150 | Fine-tunes DistilBERT on `crisis_train.csv` using HuggingFace Trainer. Uses `AutoTokenizer`/`AutoModel` (not `DistilBertTokenizer`) — see decisions section. |
 | `modelling/predict.py` | ~120 | Standalone `is_crisis()` for ad-hoc inference. Mostly superseded by `rag.py` which inlines this logic. |
 | `modelling/evaluate.py` | ~150 | Evaluates the classifier on the held-out test set. Outputs metrics CSV and confusion matrix PNG to `reports/`. |
 | `rag.py` | ~470 | **The pipeline.** Single entry point `respond()`. Lazy-loads all heavy components. Contains the orchestrator, retrieval, prompt assembly, generation (RAG and crisis paths), and crisis logging. |
 | `app.py` | ~600 | **The UI.** Streamlit chat interface with custom CSS dark theme, hero header, chat bubbles, sidebar with sliders and API key form, citation expanders, route pills, typing indicator, quota-error handling. |
-| `notebooks/` | — | Setup notebook builds the ChromaDB index from cells (one-off). |
+| `notebooks/1_setup.ipynb` | — | One-shot setup notebook. Runs every script in order: dataset download → clean → classifier download → evaluate → build_index → smoke-test rag. The recommended setup path. |
 | `.streamlit/config.toml` | ~10 | Locks dark theme + teal accents at the framework level. |
 
 ---
@@ -195,6 +196,23 @@ This means **anyone can use the deployed app without their own key** (until quot
 - Without a form, every keystroke would trigger a Streamlit rerun. Annoying and wasteful.
 - The form pattern also gives a natural place for the green confirmation message after submit.
 
+### 4.13 Why we extracted index-building from notebook cells into `build_index.py`
+
+- Originally the Chroma index was built inside notebook cells. Worked fine for development, but:
+  - A teammate cloning the repo couldn't reproduce it without opening Jupyter and running cells in order.
+  - Streamlit Cloud's container can't open notebooks.
+  - Any change to the build logic meant editing two places (notebook + the script that started to mirror it).
+- `build_index.py` puts both index builds (Counsel Chat + KB) into a single CLI script with `--force`, `--counsel`, `--kb` flags. The notebook now `%run`s the script — single source of truth.
+- The script is idempotent and selective, so editing only the KB JSON doesn't force a re-embedding of all 863 counsel chat questions.
+
+### 4.14 Why `knowledge_base.json` is auto-downloaded from Drive (not committed to the repo)
+
+- The KB is hand-curated content with citations and helpline numbers — it's authored data, not derived data.
+- We could have committed it to the repo. We chose Drive auto-download in `build_index.py` for two reasons:
+  - Keeps the data layer's pattern consistent: classifier weights are on Drive (too big for GitHub), KB is on Drive (same flow). Less special-casing.
+  - Allows iterating on the KB without forcing a repo commit + push to update the deployment.
+- Trade-off: requires an internet connection and a `gdown`-compatible Drive file (must be shared "Anyone with the link"). For a real-world product, committing the JSON would be cleaner. For an academic project, the Drive approach is fine and demonstrates a useful pattern.
+
 ---
 
 ## 5. Datasets used and how they were processed
@@ -205,7 +223,7 @@ This means **anyone can use the deployed app without their own key** (until quot
 - **Content:** ~3,000 anonymized questions from people seeking therapy advice on counselchat.com, with multiple licensed therapist answers per question.
 - **Use:** RAG corpus for the empathic-context part of retrieval.
 - **Pipeline:** `clean.py` downloads it, drops nulls, drops therapist answers under 50 characters (junk filter), strips URLs and non-ASCII, builds a `document` field combining question + answer.
-- **Indexing:** Notebook cells group by `questionText` (so 2,608 raw rows become 863 unique questions), embed the question with `all-MiniLM-L6-v2`, store all therapist answers concatenated in metadata.
+- **Indexing:** `build_index.py` groups by `questionText` (so 2,608 raw rows become 863 unique questions), embeds the question with `all-MiniLM-L6-v2`, stores all therapist answers concatenated in metadata.
 
 ### 5.2 Suicide-watch dataset (crisis classifier training)
 
@@ -219,7 +237,7 @@ This means **anyone can use the deployed app without their own key** (until quot
 - **Source:** **We wrote it ourselves.** ~30 entries covering CBT techniques (12), mindfulness/grounding (8), and psychoeducation (10). Drafted with LLM assistance, then reviewed and edited.
 - **Citations:** Beck, Linehan, Kabat-Zinn, Burns, Greenberger & Padesky, etc. — real authors and books.
 - **Schema:** `{id, category, title, tags, description, how_to, when_useful, source, disclaimer_level}`.
-- **Stored as:** `data/external/knowledge_base.json`.
+- **Hosted on Google Drive** as a single JSON. Auto-downloaded by `build_index.py` to `data/external/knowledge_base.json` if not already present locally.
 - **Indexed in Chroma** as a separate collection. We embed `title + description + tags`. The `how_to` stays in metadata — it's instructions, not a search target.
 
 ---
@@ -272,13 +290,19 @@ This means **anyone can use the deployed app without their own key** (until quot
 | `counsel_chat` | 863 | the `questionText` only | source, topic, full questionText, all therapist answers concatenated, n_answers |
 | `knowledge_base` | 30 | title + description + tags | source, category, title, tags, description, how_to, when_useful, citation, disclaimer_level |
 
-### 7.4 Retrieval
+### 7.4 Building the index
+
+`build_index.py` is a single CLI script that builds both collections end-to-end. Default behaviour: skip a collection if it already has entries; pass `--force` to wipe and rebuild. `--counsel` and `--kb` flags let you rebuild only one collection (useful when iterating on the KB JSON without re-embedding 863 counsel chat questions).
+
+The script also handles the KB's auto-download: if `data/external/knowledge_base.json` is missing, it pulls from Google Drive via `gdown` before building the KB collection.
+
+### 7.5 Retrieval
 
 - `retrieve(query, k_counsel=3, k_kb=2)` embeds the query, queries each collection separately, returns a normalized list with consistent keys (`source`, `similarity`, `topic_or_category`, `text`, `content`, `raw_meta`).
 - **Bucketed merge** — counsel chat first, then KB. Not globally sorted by similarity. (Decision 4.3.)
 - KB similarities tend to be lower than counsel chat (0.3–0.5 vs 0.5–0.7) because KB entries are short. The bucketed merge protects them from being drowned.
 
-### 7.5 Sanity-check results
+### 7.6 Sanity-check results
 
 We tested with 5–6 representative queries:
 - "I've been feeling really anxious lately" → anxiety counsel chat + Worry Time KB. ✅
@@ -417,11 +441,13 @@ When the shared Gemini key hits its daily limit:
 
 ## 11. Deployment to Streamlit Cloud
 
-- App lives at: `<your URL>`
-- **Secret:** `GEMINI_API_KEY` set in the Streamlit Cloud dashboard.
-- **Files in repo:** all source code, `models/chroma_db/` (small, ~10MB), `data/external/knowledge_base.json`, `data/processed/counsel_chat_clean.csv`.
-- **Files NOT in repo:** `models/crisis_classifier/` (~265MB, exceeds GitHub's 100MB per-file limit).
-- **Bootstrap on first boot:** `app.py` calls `_bootstrap_artifacts()` which detects the missing classifier and runs `download_crisis_classifier()` from `download_model.py` to pull it from Google Drive. This adds ~30s to the first cold start.
+- **Live URL:** https://ai-mind-companion.streamlit.app
+- **Secret:** `GEMINI_API_KEY` set in the Streamlit Cloud dashboard under Secrets.
+- **Files in repo:** all source code, `models/chroma_db/` (small, ~10MB), `data/processed/counsel_chat_clean.csv`.
+- **Files NOT in repo:**
+  - `models/crisis_classifier/` (~265 MB — exceeds GitHub's 100 MB per-file limit)
+  - `data/external/knowledge_base.json` (we host it on Drive instead, see decision 4.14)
+- **Bootstrap on first boot:** `app.py` calls `_bootstrap_artifacts()` which detects the missing classifier and runs `download_crisis_classifier()` from `download_model.py` to pull it from Google Drive. The KB JSON is similarly auto-fetched by `build_index.py`. The first cold boot adds ~30s for these downloads.
 - **Cold start:** ~5-7 minutes (pip install + first download).
 - **Subsequent starts:** ~10s (pip cache warm, classifier still in container).
 - **Free tier puts apps to sleep** after 7 days of no traffic. First wake-up is ~1-2 min.
@@ -456,7 +482,7 @@ These are great stories for the report. Real engineering problems, not pretend o
 - `logger.remove(0)` then raises `ValueError: There is no existing handler with id 0`.
 - Fix: wrap in `try/except ValueError`.
 
-### 12.5 The set_gemini_client ordering bug
+### 12.5 The `set_gemini_client` ordering bug
 
 - `set_gemini_client()` internally calls `get_components()` (to access the cache).
 - `get_components()` requires the classifier to be on disk.
@@ -464,19 +490,35 @@ These are great stories for the report. Real engineering problems, not pretend o
 - The error came up as "Failed to initialize Gemini client" — confusing because it had nothing to do with Gemini.
 - Fix: in `app.py`, call `_load_components()` (which runs the bootstrap) BEFORE `set_gemini_client()`.
 
-### 12.6 The over-broad CSS rule that hid the sidebar toggle
+### 12.6 The Chroma DB missing on cloud
+
+- After fixing the classifier bootstrap, deploy still failed: "Chroma DB not found".
+- Cause: we'd told Streamlit Cloud the classifier would be auto-downloaded but assumed Chroma was committed to the repo. The `.gitignore` wasn't actually keeping it.
+- Fix: confirm `models/chroma_db/` is in the repo (it's only ~10MB, well within GitHub limits). Update `.gitignore` to be selective: exclude `models/crisis_classifier/`, keep `models/chroma_db/`.
+
+### 12.7 The over-broad CSS rule that hid the sidebar toggle
 
 - `header[data-testid="stHeader"] { visibility: hidden; }` hid the entire Streamlit header.
 - Including the sidebar collapse button.
 - Users couldn't reopen the sidebar after closing it.
 - Fix: hide just `#MainMenu` and `footer`, leave the header transparent so the toggle is still clickable.
 
-### 12.7 The broken Gemini package import
+### 12.8 The broken Gemini package import
 
 - Old SDK: `google-generativeai` (deprecated as of 2025).
 - New SDK: `google-genai` (note the hyphen, `from google import genai`).
 - Different package, different API entirely.
 - Worth noting in dependency discussion.
+
+### 12.9 The notebook-bound index build
+
+- Originally the Chroma index was built from notebook cells. A teammate cloning the repo couldn't reproduce setup without opening Jupyter and running cells in order. Streamlit Cloud's container can't open notebooks at all.
+- Fix: extracted the build logic into `build_index.py` (~310 lines, reproducible from CLI). Notebook now `%run`s the script — single source of truth. (Decision 4.13.)
+
+### 12.10 The missing `knowledge_base.json` on a fresh clone
+
+- On the first clean re-run after the build_index extraction, the script crashed because `data/external/knowledge_base.json` didn't exist — the JSON had been generated in a notebook cell during early development and was sitting only on the original developer's machine.
+- Fix: hosted the JSON on Google Drive and added an `_ensure_kb_json()` helper to `build_index.py` that auto-downloads via `gdown` if missing. Same pattern as the classifier. (Decision 4.14.)
 
 ---
 
@@ -525,6 +567,7 @@ Useful for the "future work" section of the report.
 6. **Better safety:** combine the ML classifier with a keyword-based rule engine for defense in depth. Currently the rule-based fallback is commented out in `predict.py`.
 7. **Embedding fine-tuning** on counseling-specific text — generic `all-MiniLM-L6-v2` is decent but not domain-tuned.
 8. **Streaming responses** so the user sees Gemini's reply token-by-token instead of waiting for the full reply.
+9. **Persistent crisis log** — currently flushed on container restart. Would need an external sink (Google Sheets / a database) for a production safety-review workflow.
 
 ---
 
@@ -536,10 +579,10 @@ Useful for the "future work" section of the report.
 2. **System architecture** (1–2 pages) — the diagram from section 2, brief description of each component.
 3. **Datasets** (1 page) — section 5.
 4. **Crisis classifier** (2 pages) — model choice, training setup, evaluation results, confusion matrix figure.
-5. **RAG pipeline** (2–3 pages) — embedding, vector store, two-collection design, retrieval examples (use the catastrophizing example from section 7.5 — it's a great story).
+5. **RAG pipeline** (2–3 pages) — embedding, vector store, two-collection design, retrieval examples (use the catastrophizing example from section 7.6 — it's a great story).
 6. **LLM integration** (1–2 pages) — Gemini choice, prompt engineering, citation extraction, the thinking-mode bug as a debugging example.
 7. **Streamlit UI** (1 page) — screenshots, key features.
-8. **Deployment** (0.5 pages) — Streamlit Cloud, bootstrap pattern.
+8. **Deployment** (0.5 pages) — Streamlit Cloud, bootstrap pattern, the live URL.
 9. **Limitations and ethics** (1 page) — section 13.
 10. **Future work** (0.5 pages) — section 14.
 11. **References** — Counsel Chat dataset, suicide-watch dataset, all source citations from `knowledge_base.json`, HuggingFace models.
@@ -548,7 +591,7 @@ Useful for the "future work" section of the report.
 
 1. **Title** + team names + project name
 2. **The problem** — mental health access gap, why a chatbot
-3. **What we built** — one-line description + screenshot of the UI
+3. **What we built** — one-line description + screenshot of the UI + live URL
 4. **Architecture** — the diagram from section 2
 5. **Crisis classifier** — model + training + key metric
 6. **Crisis classifier evaluation** — confusion matrix + classification report
@@ -559,11 +602,11 @@ Useful for the "future work" section of the report.
 11. **Citation grounding** — screenshot of the source expander
 12. **Crisis routing** — flowchart, hardcoded resources, screenshot of crisis reply
 13. **The Streamlit UI** — screenshot tour of the sliders, dark theme, source cards
-14. **Deployment** — cloud architecture + bootstrap pattern (mention the 265MB classifier story)
+14. **Deployment** — cloud architecture + bootstrap pattern (mention the 265MB classifier story and the KB-on-Drive pattern)
 15. **Bugs and lessons** — pick 2–3 from section 12 for the live demo / Q&A
 16. **Limitations and ethics** — short, honest
 17. **Future work** — pick 3–4 from section 14
-18. **Demo** — live walkthrough
+18. **Demo** — live walkthrough at https://ai-mind-companion.streamlit.app
 19. **Q&A**
 
 ---
@@ -576,8 +619,9 @@ If you're seeing this codebase for the first time and want to understand it, rea
 2. **`config.py`** — paths, very short
 3. **`rag.py`** — the brain. Read top to bottom. Skim the prompt strings; focus on `respond()`, `get_components()`, `retrieve()`, `generate_response()`, `build_crisis_response()`.
 4. **`app.py`** — the face. Skim the CSS block (just know it's there). Focus on `main()` and the sidebar/key-resolution flow.
-5. **`modelling/train.py`** + **`modelling/evaluate.py`** — how the classifier was made.
-6. **`notebooks/0_main.ipynb`** — end-to-end walkthrough cells (this is where the indexing happens).
+5. **`build_index.py`** — how the vector store is constructed. Short and well-commented.
+6. **`modelling/train.py`** + **`modelling/evaluate.py`** — how the classifier was made.
+7. **`notebooks/1_setup.ipynb`** — the canonical end-to-end setup walkthrough.
 
 Most of the project is in `rag.py` (~470 lines) and `app.py` (~600 lines). The rest is glue, scripts, and one-off setup.
 
