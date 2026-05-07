@@ -55,11 +55,10 @@ assignment3/
 ├── LICENSE
 ├── Makefile                        <- (template — optional)
 ├── pyproject.toml                  <- Poetry project & dependency definition
+├── poetry.lock                     <- Resolved dependency tree (Poetry)
 ├── requirements.txt                <- Pinned deps (exported from Poetry)
 ├── setup.cfg                       <- flake8 config
 ├── .env                            <- API keys (NEVER commit)
-├── .streamlit/
-│   └── config.toml                 <- Locks dark theme + teal accents
 │
 ├── data/
 │   ├── external/
@@ -89,19 +88,31 @@ assignment3/
 │       └── training_args.bin
 │
 ├── notebooks/
-│   ├── 0_main.ipynb                <- End-to-end walk-through
-│   └── 1_setup.ipynb               <- One-shot setup notebook (runs every step in order)
+│   ├── 1_setup.ipynb               <- One-shot setup notebook (runs every step in order)
+│   └── 2_main.ipynb                <- End-to-end walk-through + interactive examples
+│
+├── references/                     <- (empty placeholder)
 │
 ├── reports/
 │   ├── crisis_classifier_results.csv
 │   └── figures/
-│       └── confusion_matrix.png
+│       ├── confusion_matrix.png    <- Crisis classifier eval
+│       ├── fig1_class_distribution.png
+│       ├── fig2_text_length.png
+│       ├── fig3_wordcloud_crisis.png
+│       ├── fig4_wordcloud_non_crisis.png
+│       ├── fig5_counsel_topics.png
+│       ├── fig6_answer_length.png
+│       └── fig7_knowledge_base.png
 │
 └── assignment3/                    <- Source package (importable)
     ├── __init__.py
+    ├── .streamlit/
+    │   └── config.toml             <- Locks dark theme + teal accents
     ├── config.py                   <- Project paths + .env loader
     ├── dataset.py                  <- Folder setup + Kaggle download
     ├── clean.py                    <- Text cleaning + train/val/test splits
+    ├── eda.py                      <- Exploratory data analysis figures (7 PNGs → reports/figures/)
     ├── download_model.py           <- Pulls trained classifier from Google Drive
     ├── build_index.py              <- Builds the Chroma vector index (both collections)
     ├── rag.py                      <- The pipeline: clean → classify → route → retrieve → generate → log
@@ -167,6 +178,12 @@ poetry run python assignment3/build_index.py --counsel    # only rebuild counsel
 poetry run python assignment3/build_index.py --kb         # only rebuild knowledge_base
 ```
 
+To regenerate the EDA figures used in the report:
+
+```bash
+poetry run python assignment3/eda.py             # writes 7 PNGs to reports/figures/
+```
+
 ### 4. Run the app
 
 ```bash
@@ -196,6 +213,7 @@ The sidebar also accepts a user-pasted Gemini API key (with a Submit / Clear for
 | `config.py` | Defines `PROJ_ROOT`, `DATA_DIR`, `MODELS_DIR`, etc. Loads `.env`. |
 | `dataset.py` | Validates `.env`, creates the data folder tree, downloads the Kaggle suicide-watch dataset. |
 | `clean.py` | Pulls Counsel Chat from HuggingFace, cleans both datasets, builds train/val/test splits. |
+| `eda.py` | Generates 7 EDA figures (class distribution, text-length distributions, word clouds, topic frequencies, answer-length histogram, KB category breakdown) into `reports/figures/`. |
 | `download_model.py` | Pulls fine-tuned DistilBERT artifacts from Google Drive into `models/crisis_classifier/`. |
 | `build_index.py` | Builds the ChromaDB vector index (`counsel_chat` + `knowledge_base` collections). Auto-downloads `knowledge_base.json` from Google Drive if missing. |
 | `modeling/train.py` | Fine-tunes DistilBERT on `crisis_train.csv` with `AutoTokenizer` / `AutoModel`. |
@@ -213,7 +231,7 @@ The deployed instance lives at: https://ai-mind-companion.streamlit.app
 To deploy your own:
 
 1. Push the repo to GitHub. Confirm `.env` is in `.gitignore`. **Do not** commit `models/crisis_classifier/` (the classifier weights are ~265 MB — over GitHub's 100 MB per-file limit).
-2. Make sure `requirements.txt` and `.streamlit/config.toml` are in the repo root.
+2. Make sure `requirements.txt` and `assignment3/.streamlit/config.toml` are in the repo.
 3. Create a new app on https://share.streamlit.io pointing at `assignment3/app.py`.
 4. In the app's **Secrets** page, add:
    ```
