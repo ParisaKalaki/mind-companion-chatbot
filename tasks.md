@@ -39,8 +39,7 @@ Response is delivered to the user with source citations (transparency), a safety
 
 ### Streamlit deployment of the project () Dead line - 5th May 2026
 - Agam
-### PPT presentation  (All) Deadline 5th May 2026 
-- All
+
 
 
 
