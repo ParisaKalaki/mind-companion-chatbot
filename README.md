@@ -224,6 +224,11 @@ The sidebar also accepts a user-pasted Gemini API key (with a Submit / Clear for
 
 ---
 
+## Video Demo of Deployment to Streamlit Cloud
+
+The demo video of the deployed instance lives at : https://drive.google.com/file/d/1tegNpx_GSeLBSwVEz05E-8ps0ri80_QT/view?usp=sharing
+
+
 ## Deployment to Streamlit Cloud
 
 The deployed instance lives at: https://ai-mind-companion.streamlit.app
