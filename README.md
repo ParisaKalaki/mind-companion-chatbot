@@ -259,12 +259,3 @@ Project layout (trimmed)
 Notes & maintenance
 
 - Some large/generated artifacts (model weights, Chroma DB) are intentionally ignored by git. If you removed them, re-run the corresponding script (e.g. `download_model.py` or `build_index.py`) to recreate them.
-- I cleaned and renamed the package from `assignment3` → `mind_companion`. Search the repo for `mind_companion` to confirm.
-
-Contributing
-
-- This repo is a personal/educational project. If you want to contribute, open an issue or submit a PR with a concise description of your change.
-
-Contact
-
-- parisa.kalaki@example.com
