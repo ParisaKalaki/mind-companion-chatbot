@@ -49,7 +49,7 @@ Everything routes through a single `respond(message, history)` entry point in `r
 ## Project Organization
 
 ```
-assignment3/
+mind_companion/
 ├── README.md                       <- This file
 ├── TEAM_BRIEFING.md                <- In-depth design decisions for teammates / report
 ├── LICENSE
@@ -105,7 +105,7 @@ assignment3/
 │       ├── fig6_answer_length.png
 │       └── fig7_knowledge_base.png
 │
-└── assignment3/                    <- Source package (importable)
+└── mind_companion/                    <- Source package (importable)
     ├── __init__.py
     ├── .streamlit/
     │   └── config.toml             <- Locks dark theme + teal accents
@@ -131,8 +131,8 @@ assignment3/
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/Doombuoyz/assignment3
-cd assignment3
+git clone https://github.com/Doombuoyz/mind_companion
+cd mind_companion
 poetry install         # or: pip install -r requirements.txt
 ```
 
@@ -160,148 +160,111 @@ The simplest path: open `notebooks/1_setup.ipynb` and run all cells top-to-botto
 If you'd rather skip the notebook, every step is also a standalone script:
 
 ```bash
-poetry run python assignment3/dataset.py         # downloads suicide-watch dataset from Kaggle
-poetry run python assignment3/clean.py           # cleans data + builds train/val/test splits
-poetry run python assignment3/download_model.py  # downloads pre-trained classifier from Google Drive
-poetry run python assignment3/build_index.py     # builds the Chroma vector index
+poetry run python mind_companion/dataset.py         # downloads suicide-watch dataset from Kaggle
+poetry run python mind_companion/clean.py           # cleans data + builds train/val/test splits
+poetry run python mind_companion/download_model.py  # downloads pre-trained classifier from Google Drive
+poetry run python mind_companion/build_index.py     # builds the Chroma vector index
                                                   #   (auto-downloads knowledge_base.json
                                                   #    from Drive if not present locally)
 ```
 
-> If you'd rather train the classifier yourself, run `poetry run python assignment3/modeling/train.py` instead of `download_model.py`. Takes ~10 min on GPU, longer on CPU.
+> If you'd rather train the classifier yourself, run `poetry run python mind_companion/modeling/train.py` instead of `download_model.py`. Takes ~10 min on GPU, longer on CPU.
 
 `build_index.py` is idempotent — re-runs are safe and cheap. Useful flags:
 
 ```bash
-poetry run python assignment3/build_index.py --force      # wipe and rebuild both collections
-poetry run python assignment3/build_index.py --counsel    # only rebuild counsel_chat
-poetry run python assignment3/build_index.py --kb         # only rebuild knowledge_base
+poetry run python mind_companion/build_index.py --force      # wipe and rebuild both collections
+poetry run python mind_companion/build_index.py --counsel    # only rebuild counsel_chat
+poetry run python mind_companion/build_index.py --kb         # only rebuild knowledge_base
 ```
 
-To regenerate the EDA figures used in the report:
+<!-- README for a minimal cleaned project -->
 
-```bash
-poetry run python assignment3/eda.py             # writes 7 PNGs to reports/figures/
-```
+# Mind Companion
 
-### 4. Run the app
+Mind Companion is an educational retrieval-augmented chatbot prototype for mental-health support. It wires a lightweight crisis classifier with a retrieval pipeline and an LLM-backed responder to produce grounded, empathetic replies.
 
-```bash
-poetry run streamlit run assignment3/app.py
-```
+Important: this is a student project and not a substitute for professional care. For emergencies, contact local emergency services or your national crisis hotline.
 
-Opens at http://localhost:8501. First message takes ~10 seconds (model warmup); subsequent messages are ~1-2 seconds.
+Quick links
 
----
+- Source package: `mind_companion/`
+- Notebooks: `notebooks/`
+- Data: `data/` (raw and processed)
 
-## Live tuning controls
+Features
 
-The Streamlit sidebar exposes three sliders that affect retrieval and routing in real time:
+- Crisis classification (binary routing)
+- Retrieval from a counseling dataset + curated knowledge base
+- Streamlit demo UI (`mind_companion/app.py`)
 
-- **Counsel Chat passages retrieved** (0–6, default 3) — empathic context from real counselor conversations
-- **Knowledge base entries retrieved** (0–5, default 2) — curated CBT / mindfulness / psychoed
-- **Crisis classifier threshold** (0.1–0.9, default 0.5) — lower = more sensitive routing to safety pathway
+Requirements
 
-The sidebar also accepts a user-pasted Gemini API key (with a Submit / Clear form) for per-session use without modifying `.env`. The app falls back gracefully through three tiers: user-pasted key → `st.secrets` → `.env`. When the shared key hits its quota, the app auto-opens the sidebar and prompts the user to paste their own key.
+- Python 3.11+
+- See `pyproject.toml` / `requirements.txt` for exact dependencies
 
----
+Setup
 
-## File-by-file reference
-
-| File | Role |
-|---|---|
-| `config.py` | Defines `PROJ_ROOT`, `DATA_DIR`, `MODELS_DIR`, etc. Loads `.env`. |
-| `dataset.py` | Validates `.env`, creates the data folder tree, downloads the Kaggle suicide-watch dataset. |
-| `clean.py` | Pulls Counsel Chat from HuggingFace, cleans both datasets, builds train/val/test splits. |
-| `eda.py` | Generates 7 EDA figures (class distribution, text-length distributions, word clouds, topic frequencies, answer-length histogram, KB category breakdown) into `reports/figures/`. |
-| `download_model.py` | Pulls fine-tuned DistilBERT artifacts from Google Drive into `models/crisis_classifier/`. |
-| `build_index.py` | Builds the ChromaDB vector index (`counsel_chat` + `knowledge_base` collections). Auto-downloads `knowledge_base.json` from Google Drive if missing. |
-| `modeling/train.py` | Fine-tunes DistilBERT on `crisis_train.csv` with `AutoTokenizer` / `AutoModel`. |
-| `modeling/evaluate.py` | Test-set metrics + confusion matrix → `reports/`. |
-| `modeling/predict.py` | Standalone `is_crisis()` for ad-hoc inference. |
-| `rag.py` | The pipeline: `respond(msg, history)` orchestrates cleaning, classification, retrieval, and generation. Lazy-loads all heavy components on first call. |
-| `app.py` | Streamlit chat UI. Imports `rag.respond`. Handles UI state, sidebar controls, the API key form, and Gemini quota recovery. |
-
----
-
-## Video Demo of Deployment to Streamlit Cloud
-
-The demo video of the deployed instance lives at : https://drive.google.com/file/d/1tegNpx_GSeLBSwVEz05E-8ps0ri80_QT/view?usp=sharing
-
-
-## Deployment to Streamlit Cloud
-
-The deployed instance lives at: https://ai-mind-companion.streamlit.app
-
-To deploy your own:
-
-1. Push the repo to GitHub. Confirm `.env` is in `.gitignore`. **Do not** commit `models/crisis_classifier/` (the classifier weights are ~265 MB — over GitHub's 100 MB per-file limit).
-2. Make sure `requirements.txt` and `assignment3/.streamlit/config.toml` are in the repo.
-3. Create a new app on https://share.streamlit.io pointing at `assignment3/app.py`.
-4. In the app's **Secrets** page, add:
-   ```
-   GEMINI_API_KEY = "your_fallback_key_here"
-   ```
-5. On first boot, the app calls `_bootstrap_artifacts()` which detects the missing classifier and runs `download_crisis_classifier()` to pull it from Google Drive (~30 seconds, one-time per fresh container). The `knowledge_base.json` file is similarly auto-fetched by `build_index.py` if needed.
-
----
-
-## Architecture notes
-
-**Why ChromaDB?** Persists to disk in one line, no server, clean Python API, and bundled HNSW indexing. FAISS is faster but bare-bones; not worth the extra plumbing for this scale.
-
-**Why embed only the question (not Q+A)?** User messages look like questions, not therapist answers. Embedding only the `questionText` and storing all therapist responses in metadata gives much higher retrieval relevance. Counsel Chat has multiple therapist responses per question, so we group by `questionText` first — 2,608 raw rows collapse to 863 unique questions with ~3 answers each.
-
-**Why two collections, not one?** Counsel Chat (~863 items) and the curated knowledge base (~30 items) play different roles. Counsel Chat gives "what other people have said about similar problems"; the KB gives "structured techniques." A bucketed retrieve (3 from counsel + 2 from KB) gives the LLM both kinds of context. A unified collection with similarity-sort would let the longer counsel chat passages drown out the shorter KB entries.
-
-**Why disable Gemini "thinking"?** `gemini-2.5-flash` has thinking enabled by default and thinking tokens count against `max_output_tokens`. With our 600-token cap, the model would burn 400+ tokens reasoning internally and truncate the visible reply mid-sentence. `thinking_config=ThinkingConfig(thinking_budget=0)` is the standard fix for chat-style use.
-
-**Why crisis_threshold = 0.5 instead of 0.7?** For a mental-health context, missing a real crisis is worse than over-flagging. Lowering the default threshold makes the classifier more sensitive at the cost of slightly more false positives — but a false positive just shows the user a list of helplines, while a false negative means missing someone in danger.
-
-**Why hardcode the crisis resources block?** The LLM writes the empathic acknowledgement (which adapts to what the user said), but the helpline numbers are concatenated verbatim from a constant. Phone numbers must never be paraphrased, hallucinated, or "improved" by the LLM. Wrong number = real harm.
-
-**Why three-tier API key resolution?** User-pasted (sidebar form) wins for the highest priority — keys never touch disk and a power user can dodge shared-key rate limits. Streamlit secrets is the deployment-time fallback. `.env` is the local-dev fallback. When the shared key hits its quota, the app catches the 429, auto-expands the sidebar, and prompts the user to paste their own key.
-
----
-
-## Generating the requirements file (Poetry)
-
-This project uses Poetry for dependency management. To export the locked dependencies into a `requirements.txt` that Streamlit Cloud and other deployment targets can use:
-
-```bash
-# install the export plugin once
-poetry self add poetry-plugin-export
-
-# export to requirements.txt (without dev dependencies, without hashes)
-poetry export -f requirements.txt --output requirements.txt --without-hashes
-
-# include dev dependencies as well
-poetry export -f requirements.txt --output requirements.txt --without-hashes --with dev
-```
-
-To install from the lock file:
+1. Install dependencies:
 
 ```bash
 poetry install
+# or: pip install -r requirements.txt
 ```
 
-To add a new dependency:
+2. Create a `.env` file at the repo root with any API keys you need (examples):
+
+```env
+KAGGLE_USERNAME=...
+KAGGLE_KEY=...
+GEMINI_API_KEY=...
+```
+
+Running the pipeline (typical)
 
 ```bash
-poetry add <package>               # runtime dep
-poetry add --group dev <package>   # dev-only dep
+# download dataset (if needed)
+poetry run python mind_companion/dataset.py
+# clean & prepare splits
+poetry run python mind_companion/clean.py
+# download pretrained classifier weights (or train your own)
+poetry run python mind_companion/download_model.py
+# build vector index
+poetry run python mind_companion/build_index.py
 ```
 
-To regenerate the lock file after editing `pyproject.toml`:
+Run the demo UI
 
 ```bash
-poetry lock
+poetry run streamlit run mind_companion/app.py
+# then open http://localhost:8501
 ```
 
----
+Project layout (trimmed)
 
-## Acknowledgements
+```
+.
+├── data/
+├── mind_companion/
+│   ├── app.py
++   ├── rag.py
++   ├── dataset.py
++   └── modeling/
+├── notebooks/
+├── reports/
+├── pyproject.toml
+└── requirements.txt
+```
 
-- **Counsel Chat dataset** by [nbertagnolli](https://huggingface.co/datasets/nbertagnolli/counsel-chat) on HuggingFace
-- **Suicide and Depression Detection** dataset by [Nikhileswar Komati](https://www.kaggle.com/datasets/nikhileswarkomati/suicide-watch) on Kaggle
-- Crisis support resources (Australia): Lifeline, Beyond Blue, Suicide Call Back Service, 13YARN, Kids Helpline
+Notes & maintenance
+
+- Some large/generated artifacts (model weights, Chroma DB) are intentionally ignored by git. If you removed them, re-run the corresponding script (e.g. `download_model.py` or `build_index.py`) to recreate them.
+- I cleaned and renamed the package from `assignment3` → `mind_companion`. Search the repo for `mind_companion` to confirm.
+
+Contributing
+
+- This repo is a personal/educational project. If you want to contribute, open an issue or submit a PR with a concise description of your change.
+
+Contact
+
+- parisa.kalaki@example.com

@@ -1,11 +1,6 @@
 # Data
 /data/
-models/
-reports/
-*.sqlite3
-*.bin
-references/
-tasks.md
+
 # Mac OS-specific storage files
 .DS_Store
 kaggle_api.txt

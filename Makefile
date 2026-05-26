@@ -2,7 +2,7 @@
 # GLOBALS                                                                       #
 #################################################################################
 
-PROJECT_NAME = assignment3
+PROJECT_NAME = mind_companion
 PYTHON_VERSION = >3.11.4
 PYTHON_INTERPRETER = python
 
@@ -29,15 +29,15 @@ clean:
 ## Lint using flake8, black, and isort (use `make format` to do formatting)
 .PHONY: lint
 lint:
-	flake8 assignment3
-	isort --check --diff assignment3
-	black --check assignment3
+	flake8 mind_companion
+	isort --check --diff mind_companion
+	black --check mind_companion
 
 ## Format source code with black
 .PHONY: format
 format:
-	isort assignment3
-	black assignment3
+	isort mind_companion
+	black mind_companion
 
 
 
