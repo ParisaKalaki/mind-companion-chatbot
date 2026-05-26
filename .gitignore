@@ -192,4 +192,5 @@ cython_debug/
 data/processed/crisis_val.csv
 data/processed/crisis_test.csv
 models/crisis_classifier
+models/chroma_db/
 .vscode/

@@ -14,7 +14,7 @@ Generates 7 PNG figures into reports/figures/:
 
 Run from anywhere:
     python eda.py
-    poetry run python assignment3/eda.py
+    poetry run python mind_companion/eda.py
 """
 
 import json
